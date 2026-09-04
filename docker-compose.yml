@@ -1,0 +1,12 @@
+services:
+  art-proxy:
+    # Replace <owner>/<repo> below once your GitHub Actions build has run once.
+    image: ghcr.io/<owner>/<repo>:latest
+    container_name: stremio-art-proxy
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./cache:/data/cache
