@@ -38,6 +38,11 @@ jobs:
             type=semver,pattern={{version}}
             type=sha
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -46,6 +51,10 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          # Your VPS is ARM - GitHub's runners are amd64, so this cross-builds
+          # via QEMU emulation (the setup-qemu-action step above). This makes
+          # the build noticeably slower (expect ~2-4x a native build) but it's
+          # a one-time cost per push, not per-request at runtime.
+          platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

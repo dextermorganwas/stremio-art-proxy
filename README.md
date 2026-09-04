@@ -72,9 +72,12 @@ These are all just `.env` values — tune freely:
 
 - "720p" / "750p" thresholds are interpreted as **pixel width**
   (`MIN_BACKDROP_WIDTH=1280`, `MIN_POSTER_WIDTH=750`), not video resolution.
-- "All languages" fallback uses a fixed list of ~30 common ISO-639-1 codes
-  (`TMDB_ALL_LANGUAGES_FALLBACK_LIST`) rather than a true unlimited query,
-  since TMDB's images endpoint requires you to enumerate languages.
+- "All languages" fallback enumerates the full ISO-639-1 code list
+  (`TMDB_ALL_LANGUAGES_FALLBACK_LIST`). TMDB's images endpoint has no
+  wildcard for `include_image_language` - confirmed via TMDB's own dev
+  forum, where a "give me every language" option was requested and never
+  added - so enumerating every code is the only way to get true broad
+  coverage.
 - Backdrops' absolute last-resort fallback (after Metahub also fails) allows
   *any* backdrop regardless of text, not just textless ones — better than a
   404.
@@ -109,6 +112,22 @@ npm install
 cp .env.example .env   # then edit .env
 npm run dev
 ```
+
+### Generating the lockfile (do this once, before your first Docker build)
+
+The Docker build uses `npm ci`, which requires a `package-lock.json` to be
+present and installs exactly the versions it records - this is what makes
+builds reproducible instead of silently picking up newer dependency versions
+over time. This repo doesn't ship one yet (it was written without network
+access), so before your first build:
+
+```bash
+npm install          # generates/updates package-lock.json
+```
+
+Then commit `package-lock.json` (via GitHub Desktop, same as any other file)
+and push. From then on, only re-run `npm install` and commit the updated
+lockfile when you deliberately want to bump a dependency version.
 
 ## Deploying with Docker Compose (pulling from GHCR)
 

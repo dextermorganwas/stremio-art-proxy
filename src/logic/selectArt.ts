@@ -70,9 +70,18 @@ export async function resolveArt(artType: ArtType, ids: ParsedIds): Promise<Reso
     const selection = selectBestImage(bracket.images, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
 
     const eligibleCount = bracket.images.filter((i) => i.width >= minWidth).length;
-    const needsHelp = eligibleCount < config.minBracketSize || selection.confidence !== 'good';
+    // Two independent reasons to distrust this bracket and give Metahub a
+    // real shot (not just an absolute last resort):
+    //   - too few candidates at all, e.g. a niche title TMDB barely covers
+    //   - candidates exist, but none was trustworthy enough to clear even
+    //     the lowest vote floor (selection.confidence === 'low')
+    // Either one alone is enough - a bracket doesn't need to be empty to
+    // be considered untrustworthy.
+    const bracketTooThin = eligibleCount < config.minBracketSize;
+    const bestCandidateUntrustworthy = selection.confidence !== 'good';
+    const preferMetahub = bracketTooThin || bestCandidateUntrustworthy;
 
-    if (selection.image && !needsHelp) {
+    if (selection.image && !preferMetahub) {
       return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: `tmdb:${bracket.name}` };
     }
 
@@ -80,10 +89,9 @@ export async function resolveArt(artType: ArtType, ids: ParsedIds): Promise<Reso
       bestFallback = { image: selection.image, bracketName: bracket.name };
     }
 
-    // Bracket was too thin or too low-confidence: give metahub a real shot,
-    // not just as an absolute last resort. (Not applicable to logos here -
-    // logo metahub fallback happens once, after both brackets are tried.)
-    if (needsHelp && artType !== 'logo') {
+    // (Not applicable to logos here - logo metahub fallback happens once,
+    // after both brackets are tried, see below.)
+    if (preferMetahub && artType !== 'logo') {
       const metahub = await tryMetahub(artType, ids.imdbId);
       if (metahub) return metahub;
     }

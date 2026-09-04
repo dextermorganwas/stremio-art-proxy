@@ -4,6 +4,7 @@ services:
     image: ghcr.io/<owner>/<repo>:latest
     container_name: stremio-art-proxy
     restart: unless-stopped
+    init: true   # use Docker's built-in tini as PID 1 (proper signal handling/zombie reaping)
     ports:
       - "3000:3000"
     env_file:
