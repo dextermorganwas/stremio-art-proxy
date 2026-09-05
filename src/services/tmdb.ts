@@ -3,7 +3,7 @@ import { cacheGet, cacheSet } from './cache';
 import { fetchWithTimeout } from './httpQueue';
 import { dedupe } from './inflight';
 import { logger } from '../logger';
-import { TmdbImage, TmdbImagesPayload, TmdbMediaType } from '../types';
+import { TitleMeta, TmdbImage, TmdbImagesPayload, TmdbMediaType } from '../types';
 
 interface FindResult {
   tmdbId: string;
@@ -53,6 +53,25 @@ function mapImage(img: any): TmdbImage {
   };
 }
 
+function mapMeta(mediaType: TmdbMediaType, details: any): TitleMeta {
+  if (mediaType === 'movie') {
+    return {
+      mediaType,
+      releaseDate: details.release_date || null,
+      status: null,
+      nextEpisodeAirDate: null,
+      lastEpisodeAirDate: null,
+    };
+  }
+  return {
+    mediaType,
+    releaseDate: null,
+    status: details.status || null,
+    nextEpisodeAirDate: details.next_episode_to_air?.air_date || null,
+    lastEpisodeAirDate: details.last_episode_to_air?.air_date || null,
+  };
+}
+
 /**
  * Fetches title details (for original_language) + images restricted to
  * english + original-language + textless(null) in a single logical unit.
@@ -77,6 +96,7 @@ export async function getImages(
       }
       const details = (await detailsRes.json()) as any;
       const originalLanguage: string = details.original_language || 'en';
+      const meta = mapMeta(mediaType, details);
 
       const langParam = Array.from(new Set(['en', originalLanguage])).join(',');
       const imagesUrl = `${config.tmdbBaseUrl}/${mediaType}/${tmdbId}/images?api_key=${config.tmdbApiKey}&include_image_language=${langParam},null`;
@@ -92,6 +112,7 @@ export async function getImages(
         posters: (imagesData.posters || []).map(mapImage),
         backdrops: (imagesData.backdrops || []).map(mapImage),
         logos: (imagesData.logos || []).map(mapImage),
+        meta,
       };
 
       cacheSet(cacheKey, payload, config.tmdbPayloadTtlSeconds);
@@ -141,4 +162,18 @@ export async function getAllLanguageImages(
 
 export function tmdbImageUrl(size: string, filePath: string): string {
   return `${config.tmdbImageBaseUrl}/${size}${filePath}`;
+}
+
+/** TMDB's daily/weekly trending list - used for the "TOP" trending badge. */
+export async function getTmdbTrendingIds(mediaType: TmdbMediaType): Promise<string[]> {
+  try {
+    const url = `${config.tmdbBaseUrl}/trending/${mediaType}/${config.trendingTmdbWindow}?api_key=${config.tmdbApiKey}`;
+    const res = await fetchWithTimeout(url, config.requestTimeoutMs);
+    if (!res.ok) return [];
+    const data = (await res.json()) as any;
+    return (data.results || []).map((r: any) => String(r.id));
+  } catch (err) {
+    logger.warn('[tmdb] getTmdbTrendingIds failed', mediaType, err);
+    return [];
+  }
 }

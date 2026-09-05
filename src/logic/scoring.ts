@@ -51,3 +51,14 @@ export function selectBestImage<T extends ScorableImage>(
   );
   return { image: fallbackSorted[0], confidence: 'low' };
 }
+
+/**
+ * True if `a` should be preferred over `b` when comparing two already-chosen
+ * "best of bracket" candidates against each other (e.g. English's best vs.
+ * Original-language's best, when picking a fallback across brackets).
+ */
+export function isBetterCandidate<T extends ScorableImage>(a: T, b: T): boolean {
+  if (a.vote_average !== b.vote_average) return a.vote_average > b.vote_average;
+  if (a.vote_count !== b.vote_count) return a.vote_count > b.vote_count;
+  return a.width > b.width;
+}

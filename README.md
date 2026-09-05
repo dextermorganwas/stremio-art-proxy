@@ -24,27 +24,37 @@ understands a `tvdb:{tvdb_id}` segment if you want to add that to your
 template too. At least one of `tmdb`, `imdb`, or `tvdb` must resolve to a
 usable id, or the request 400s.
 
-## Selection logic (what it actually does)
+## Selection logic (what it actually does — per art type, they genuinely differ)
 
-**Posters & logos:**
-1. Look at TMDB images tagged `en` (English).
-2. If none (or too few / too low quality — see below), look at TMDB images
-   tagged with the title's original language, when that's not already English.
-3. If that bracket is also missing/weak, try Metahub.
-4. Absolute last resort: best-scoring TMDB image across a broad list of
-   languages (`TMDB_ALL_LANGUAGES_FALLBACK_LIST`), ignoring language entirely.
+**Posters:**
+1. Count *all* eligible TMDB posters across every language (not just
+   English/original). If that overall count is below `MIN_BRACKET_SIZE`
+   (default 5), TMDB's coverage of this title is judged too thin — try
+   Metahub first.
+2. Otherwise (or if Metahub had nothing), cascade English → original
+   language, taking the best-scoring image in whichever bracket has any
+   candidates. No vote-quality gate at this stage — if TMDB's overall
+   coverage is healthy, its English-first pick is trusted as-is.
+3. If TMDB was thin and Metahub also failed, rank the best candidate from
+   *every* bracket against each other (not just whichever was checked
+   first) and use the best of those.
+4. Absolute last resort: best-scoring poster across a broad list of
+   languages (`TMDB_ALL_LANGUAGES_FALLBACK_LIST`).
 
-**Backdrops:** same idea, but only ever considers *textless* TMDB backdrops.
-TMDB has no explicit "textless" flag — by convention, backdrops with no
-burned-in text carry no language tag at all (`iso_639_1 === null`), so that's
-what "textless" filters on.
+**Logos:** simple cascade, no quality gate anywhere —
+English bracket → original-language bracket → Metahub (only tried when
+*both* brackets are completely empty) → best-of-all-languages TMDB logo.
 
-**"Too few / too low quality" (the smart-Metahub trigger):** a bracket
-triggers a Metahub check — not just as a last resort — when it has fewer than
-`MIN_BRACKET_SIZE` (default 5) eligible images after the resolution filter,
-**or** when the scoring pass below never found an image meeting even the
-lowest vote-count floor. This was your explicit ask: Metahub shouldn't only
-kick in when TMDB has *nothing*, but also when what TMDB has isn't trustworthy.
+**Backdrops:** only ever considers *textless* TMDB backdrops — at every
+single stage, including the final fallback. TMDB has no explicit "textless"
+flag; by convention, backdrops with no burned-in text carry no language tag
+(`iso_639_1 === null`), so that's what "textless" filters on.
+1. Look at textless backdrops. If fewer than `MIN_BRACKET_SIZE` are eligible,
+   or none clear the scoring floor below, try Metahub.
+2. If that fails, widen to textless backdrops across all languages (still
+   textless-only — never falls back to a backdrop with text).
+3. If that also fails, use TMDB's low-confidence textless pick rather than
+   nothing.
 
 **Scoring ("best" image within a bracket), exactly as you described:**
 1. Hard filter: drop anything under `MIN_POSTER_WIDTH` (750px) /
@@ -56,15 +66,15 @@ kick in when TMDB has *nothing*, but also when what TMDB has isn't trustworthy.
 3. If nothing has that many votes, step the floor down by `VOTE_FLOOR_STEP`
    (2) and retry, down to `VOTE_FLOOR_MIN` (4).
 4. If even that finds nothing, we no longer trust the vote data at all: pick
-   the most-voted image (then highest average) as a low-confidence fallback,
-   which is exactly the case that also triggers a Metahub check.
+   the most-voted image (then highest average) as a low-confidence fallback.
+   For backdrops only, this low-confidence result is still what triggers a
+   Metahub check (posters no longer use vote-quality as a Metahub trigger —
+   only overall thinness does, per your request).
 
 **Metahub "extra" verification (posters/backdrops only):** before trusting a
 Metahub URL, the app does a `HEAD` request and checks `Content-Length` against
 `METAHUB_MIN_CONTENT_LENGTH_BYTES`, so a broken/placeholder image on Metahub's
-end doesn't get redirected to. Logos skip this check and just use Metahub
-directly as a simple last-resort swap-in, since bad logo fallbacks are far
-less visually jarring than a broken poster/backdrop.
+end doesn't get redirected to. Logos skip this check.
 
 ### Assumptions I made where your spec was open-ended
 
@@ -85,7 +95,51 @@ These are all just `.env` values — tune freely:
   many simultaneous TMDB/Metahub requests the server makes at once. Lower it
   on weaker hardware.
 
-## Caching & concurrency
+## Trending badge & status sash (posters only)
+
+Both are opt-in (`ENABLE_TRENDING_BADGE` / `ENABLE_STATUS_SASH`, off by
+default) and **only apply to posters** — Stremio has no way to overlay
+badges itself, so when either is on, the poster route stops redirecting and
+instead downloads the resolved poster, draws the badge(s) on top with
+`sharp`, and serves the composited image bytes directly (cached separately,
+`BADGE_IMAGE_CACHE_TTL_SECONDS`, default 6h, shorter than the normal art
+cache since trending/status data changes over time). Backdrops and logos are
+untouched either way.
+
+**Trending badge:** a small gold "TOP" pill with a flame icon, top-left
+corner. Source is switchable:
+- `TRENDING_SOURCE=tmdb` (default): TMDB's own daily/weekly trending list.
+- `TRENDING_SOURCE=mdblist`: your own MDBList list(s) - `MDBLIST_MOVIE_LIST`
+  and `MDBLIST_TV_LIST` separately, since a list is normally one media type.
+  **Caveat:** MDBList doesn't have a single fully-public API reference, so
+  the request shape here (`MDBLIST_LIST_ENDPOINT_TEMPLATE`) is my best
+  reconstruction from their list URL format and third-party tool docs, not
+  a verified spec. If it doesn't return anything, check the warning it logs
+  (includes the exact URL and HTTP status) against
+  [docs.mdblist.com](https://docs.mdblist.com) and adjust the template in
+  `.env` - no code change needed.
+
+**Status sash:** a thin bar across the bottom - Airing / Returning / Ended /
+Canceled for TV (from TMDB's `status` field, with Airing vs Returning split
+by how close the nearest episode is, `AIRING_WINDOW_DAYS`), or Recently Added
+for movies (TMDB has no "added to your library" concept, so this uses
+release-date recency, `RECENT_ADDED_WINDOW_DAYS`, as the closest proxy).
+Colors per status are set in `.env` (`SASH_COLOR_*`). Before drawing it, the
+app samples the poster's own pixels in that bottom strip - if the poster is
+already dark there, it uses a neutral dark gray (`SASH_COLOR_DARK_FALLBACK`)
+instead of the semantic color, so a bright blue/green bar doesn't clash with
+a moody dark poster.
+
+Font is a bold sans-serif (Helvetica/Arial family) rather than an exact match
+to your reference images' font (likely San Francisco), since embedding
+Apple's font isn't something I can bundle here - visually close, not
+pixel-identical. The flame icon is a simple drawn vector shape rather than
+an emoji glyph, since emoji fonts aren't reliably present in the Alpine
+container. If either looks off once deployed, it's a quick tweak in
+`src/services/imageCompose.ts` (font-family / SVG path) - let me know what
+you see and I can adjust it precisely.
+
+
 
 - Every resolved art URL is cached for `CACHE_TTL_SECONDS` (default 7 days),
   keyed by art type + whichever ids were supplied.
