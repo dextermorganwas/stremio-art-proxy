@@ -36,7 +36,7 @@ function buildSashSvg(width: number, height: number, label: string, color: strin
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="${y}" width="${width}" height="${sashHeight}" fill="${color}" />
     <text x="${width / 2}" y="${y + sashHeight / 2}" text-anchor="middle" dominant-baseline="central"
-      font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="700"
+      font-family="DejaVu Sans, sans-serif" font-weight="bold"
       font-size="${fontSize}" letter-spacing="1.2" fill="#ffffff">${escapeXml(label.toUpperCase())}</text>
   </svg>`;
 }
@@ -44,33 +44,28 @@ function buildSashSvg(width: number, height: number, label: string, color: strin
 function buildTrendingBadgeSvg(width: number, height: number): string {
   const margin = Math.round(width * 0.04);
   const badgeHeight = Math.round(width * 0.11);
-  const badgeWidth = Math.round(badgeHeight * 2.5);
+  const badgeWidth = Math.round(badgeHeight * 2.6);
   const rx = badgeHeight / 2;
   const fontSize = Math.round(badgeHeight * 0.44);
-  const flameSize = badgeHeight * 0.62;
-  const flameX = badgeHeight * 0.32;
+  const flameSize = badgeHeight * 0.6;
+  const flameX = badgeHeight * 0.34;
   const flameY = (badgeHeight - flameSize) / 2;
 
   // Simple stylized flame, drawn as a path rather than relying on an emoji
-  // font (not reliably available in the container's font set).
+  // font (not reliably available in the container's font set) - filled
+  // white to match the flat orange-and-white look you asked for.
   const flame = `<path transform="translate(${flameX},${flameY}) scale(${flameSize / 24})"
     d="M12 2c1 3-2 4-2 7a3 3 0 0 0 6 0c0-1-0.5-2-0.5-2 1.5 1 2.5 3 2.5 5a6 6 0 0 1-12 0c0-4 3-5 4-7 0.5-1 1-2 2-3z"
-    fill="#7A3B00" />`;
+    fill="#ffffff" />`;
 
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="topGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${config.trendingBadgeColorStart}" />
-        <stop offset="100%" stop-color="${config.trendingBadgeColorEnd}" />
-      </linearGradient>
-    </defs>
     <g transform="translate(${margin}, ${margin})">
-      <rect width="${badgeWidth}" height="${badgeHeight}" rx="${rx}" ry="${rx}" fill="url(#topGrad)" />
+      <rect width="${badgeWidth}" height="${badgeHeight}" rx="${rx}" ry="${rx}" fill="${config.trendingBadgeColor}" />
       ${flame}
-      <text x="${badgeHeight * 0.78 + (badgeWidth - badgeHeight * 0.78) / 2}" y="${badgeHeight / 2}"
+      <text x="${badgeHeight * 0.8 + (badgeWidth - badgeHeight * 0.8) / 2}" y="${badgeHeight / 2}"
         text-anchor="middle" dominant-baseline="central"
-        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="800"
-        font-size="${fontSize}" letter-spacing="0.5" fill="#3A1A00">TOP</text>
+        font-family="DejaVu Sans, sans-serif" font-weight="bold"
+        font-size="${fontSize}" letter-spacing="0.5" fill="#ffffff">TOP</text>
     </g>
   </svg>`;
 }

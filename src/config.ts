@@ -29,12 +29,11 @@ export const config = {
   tmdbPosterSize: str('TMDB_POSTER_SIZE', 'w780'),
   tmdbBackdropSize: str('TMDB_BACKDROP_SIZE', 'w1280'),
   tmdbLogoSize: str('TMDB_LOGO_SIZE', 'w500'),
-  // Used ONLY for the rare "best art out of all languages" last-resort fallback.
-  // TMDB's /images endpoint has no wildcard for include_image_language (confirmed
-  // via their own dev forum - a "give me every language" option was requested
-  // and never added), so getting broad coverage means enumerating codes. This
-  // default is the full ISO 639-1 set, i.e. as close to "actually all languages"
-  // as the API allows. If TMDB ever rejects a list this long, trim it here.
+  // Broad, explicit language list for the single images call every art
+  // request makes (deliberately not "all languages" via wildcard, since
+  // TMDB's images endpoint has none - confirmed via their own dev forum).
+  // This is the default (near-full ISO 639-1 list); override to trim it if
+  // TMDB ever rejects a list this long.
   tmdbAllLanguagesFallbackList: str(
     'TMDB_ALL_LANGUAGES_FALLBACK_LIST',
     'aa,ab,ae,af,ak,am,an,ar,as,av,ay,az,ba,be,bg,bh,bi,bm,bn,bo,br,bs,ca,ce,ch,co,cr,cs,cu,cv,cy,' +
@@ -86,21 +85,17 @@ export const config = {
   trendingSource: str('TRENDING_SOURCE', 'tmdb'), // tmdb | mdblist
   trendingTmdbWindow: str('TRENDING_TMDB_WINDOW', 'day'), // day | week
   trendingRefreshIntervalSeconds: num('TRENDING_REFRESH_INTERVAL_SECONDS', 3600),
-  trendingBadgeColorStart: str('TRENDING_BADGE_COLOR_START', '#FFD36E'),
-  trendingBadgeColorEnd: str('TRENDING_BADGE_COLOR_END', '#F5A623'),
+  trendingBadgeColor: str('TRENDING_BADGE_COLOR', '#FF8A3D'),
 
-  // MDBList - separate lists for movies/tv. `MDBLIST_*_LIST` is whatever
-  // comes after mdblist.com/lists/ in your list's URL, e.g. "username/slug".
-  // The exact endpoint MDBList expects isn't fully documented publicly, so
-  // this is templated - if requests fail, check the logged URL/status against
-  // https://docs.mdblist.com and adjust MDBLIST_LIST_ENDPOINT_TEMPLATE.
+  // MDBList - separate lists for movies/tv. `MDBLIST_*_LIST` accepts either
+  // a full URL (https://mdblist.com/lists/username/slug) or just
+  // "username/slug" - either works. Public lists need no API key at all
+  // (uses MDBList's public JSON endpoint); MDBLIST_API_KEY is only kept
+  // around in case you point the template at an authenticated endpoint.
   mdblistApiKey: str('MDBLIST_API_KEY', ''),
   mdblistMovieList: str('MDBLIST_MOVIE_LIST', ''),
   mdblistTvList: str('MDBLIST_TV_LIST', ''),
-  mdblistListEndpointTemplate: str(
-    'MDBLIST_LIST_ENDPOINT_TEMPLATE',
-    'https://api.mdblist.com/lists/{list}/items?apikey={apikey}'
-  ),
+  mdblistListEndpointTemplate: str('MDBLIST_LIST_ENDPOINT_TEMPLATE', 'https://mdblist.com/lists/{list}/json'),
 
   // --- Bottom status sash ---
   enableStatusSash: bool('ENABLE_STATUS_SASH', false),
@@ -114,10 +109,10 @@ export const config = {
 
   sashColorAiring: str('SASH_COLOR_AIRING', '#2563EB'),
   sashColorReturning: str('SASH_COLOR_RETURNING', '#16A34A'),
-  sashColorEnded: str('SASH_COLOR_ENDED', '#4B5563'),
+  sashColorEnded: str('SASH_COLOR_ENDED', '#6B5B95'),
   sashColorCanceled: str('SASH_COLOR_CANCELED', '#DC2626'),
   sashColorRecentlyAdded: str('SASH_COLOR_RECENTLY_ADDED', '#DC2626'),
-  sashColorDarkFallback: str('SASH_COLOR_DARK_FALLBACK', '#3F3F46'),
+  sashColorDarkFallback: str('SASH_COLOR_DARK_FALLBACK', '#232326'),
 
   // Badged (composited) posters are cached separately from plain resolved
   // URLs, and for less time, since trending/status data changes over time.

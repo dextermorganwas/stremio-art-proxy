@@ -51,9 +51,7 @@ flag; by convention, backdrops with no burned-in text carry no language tag
 (`iso_639_1 === null`), so that's what "textless" filters on.
 1. Look at textless backdrops. If fewer than `MIN_BRACKET_SIZE` are eligible,
    or none clear the scoring floor below, try Metahub.
-2. If that fails, widen to textless backdrops across all languages (still
-   textless-only — never falls back to a backdrop with text).
-3. If that also fails, use TMDB's low-confidence textless pick rather than
+2. If that also fails, use TMDB's low-confidence textless pick rather than
    nothing.
 
 **Scoring ("best" image within a bracket), exactly as you described:**
@@ -106,18 +104,15 @@ instead downloads the resolved poster, draws the badge(s) on top with
 cache since trending/status data changes over time). Backdrops and logos are
 untouched either way.
 
-**Trending badge:** a small gold "TOP" pill with a flame icon, top-left
-corner. Source is switchable:
+**Trending badge:** a flat bright-orange pill (`TRENDING_BADGE_COLOR`,
+default `#FF8A3D`) with white "TOP" text and a white flame icon, top-left
+corner — no gradient. Source is switchable:
 - `TRENDING_SOURCE=tmdb` (default): TMDB's own daily/weekly trending list.
 - `TRENDING_SOURCE=mdblist`: your own MDBList list(s) - `MDBLIST_MOVIE_LIST`
   and `MDBLIST_TV_LIST` separately, since a list is normally one media type.
-  **Caveat:** MDBList doesn't have a single fully-public API reference, so
-  the request shape here (`MDBLIST_LIST_ENDPOINT_TEMPLATE`) is my best
-  reconstruction from their list URL format and third-party tool docs, not
-  a verified spec. If it doesn't return anything, check the warning it logs
-  (includes the exact URL and HTTP status) against
-  [docs.mdblist.com](https://docs.mdblist.com) and adjust the template in
-  `.env` - no code change needed.
+  Accepts either a full list URL or just `username/slug`. Public lists need
+  no API key — this uses MDBList's public `/lists/{username}/{slug}/json`
+  endpoint rather than the key-gated REST API.
 
 **Status sash:** a thin bar across the bottom - Airing / Returning / Ended /
 Canceled for TV (from TMDB's `status` field, with Airing vs Returning split
@@ -126,18 +121,21 @@ for movies (TMDB has no "added to your library" concept, so this uses
 release-date recency, `RECENT_ADDED_WINDOW_DAYS`, as the closest proxy).
 Colors per status are set in `.env` (`SASH_COLOR_*`). Before drawing it, the
 app samples the poster's own pixels in that bottom strip - if the poster is
-already dark there, it uses a neutral dark gray (`SASH_COLOR_DARK_FALLBACK`)
-instead of the semantic color, so a bright blue/green bar doesn't clash with
-a moody dark poster.
+already dark there, it uses a neutral dark charcoal (`SASH_COLOR_DARK_FALLBACK`,
+`#232326`) instead of the semantic color, so a bright blue/green bar doesn't
+clash with a moody dark poster. Note: `SASH_COLOR_ENDED` and the dark
+fallback are deliberately different colors (muted purple vs near-black) so
+you can visually tell which one fired, rather than two shades of gray that
+look identical either way.
 
-Font is a bold sans-serif (Helvetica/Arial family) rather than an exact match
-to your reference images' font (likely San Francisco), since embedding
-Apple's font isn't something I can bundle here - visually close, not
-pixel-identical. The flame icon is a simple drawn vector shape rather than
-an emoji glyph, since emoji fonts aren't reliably present in the Alpine
-container. If either looks off once deployed, it's a quick tweak in
-`src/services/imageCompose.ts` (font-family / SVG path) - let me know what
-you see and I can adjust it precisely.
+**Rendering requirements:** drawing text onto an image requires an actual
+font and fontconfig installed in the container — Alpine's base image has
+neither by default, which is why badge text failed to render entirely until
+this was added to the Dockerfile (`fontconfig` + `ttf-dejavu`). Text uses
+DejaVu Sans Bold — visually close to a clean system sans-serif, not an exact
+match for Apple's San Francisco font, since that font isn't something I can
+legally bundle. The flame icon is a simple drawn vector shape rather than an
+emoji glyph, since emoji fonts aren't reliably present in this environment.
 
 
 

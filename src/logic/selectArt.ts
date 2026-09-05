@@ -1,6 +1,6 @@
 import { config } from '../config';
-import { ArtType, ParsedIds, TmdbImage, TmdbMediaType } from '../types';
-import { findByExternalId, getAllLanguageImages, getImages, tmdbImageUrl } from '../services/tmdb';
+import { ArtType, ParsedIds, TmdbImage, TmdbImagesPayload, TmdbMediaType } from '../types';
+import { findByExternalId, getImages, tmdbImageUrl } from '../services/tmdb';
 import { metahubUrl, MetahubKind, verifyMetahubImage } from '../services/metahub';
 import { isBetterCandidate, selectBestImage } from './scoring';
 import { logger } from '../logger';
@@ -44,29 +44,24 @@ async function tryMetahub(artType: ArtType, imdbId: string | undefined, verify: 
 
 export async function resolveArt(artType: ArtType, ids: ParsedIds): Promise<ResolvedArt | null> {
   const identity = await resolveTmdbIdentity(ids);
+  const payload = identity ? await getImages(identity.mediaType, identity.tmdbId) : null;
 
-  if (artType === 'poster') return resolvePoster(identity, ids);
-  if (artType === 'backdrop') return resolveBackdrop(identity, ids);
-  return resolveLogo(identity, ids);
+  if (artType === 'poster') return resolvePoster(payload, ids);
+  if (artType === 'backdrop') return resolveBackdrop(payload, ids);
+  return resolveLogo(payload, ids);
 }
 
 // ---------------------------------------------------------------------------
 // Posters: fallback to Metahub only when TMDB's *overall* coverage (across
-// every language, not just the english/original bracket) is thin or empty.
-// Once TMDB coverage is judged sufficient, English-first cascade applies with
-// no additional vote-quality gate - we just take the best of whichever
-// bracket has candidates.
+// every language in `payload`, not just the english/original bracket) is
+// thin or empty. Once TMDB coverage is judged sufficient, English-first
+// cascade applies with no additional vote-quality gate.
 // ---------------------------------------------------------------------------
-async function resolvePoster(identity: Identity | null, ids: ParsedIds): Promise<ResolvedArt | null> {
+async function resolvePoster(payload: TmdbImagesPayload | null, ids: ParsedIds): Promise<ResolvedArt | null> {
   const minWidth = config.minPosterWidth;
   const tmdbSize = config.tmdbPosterSize;
 
-  const payload = identity ? await getImages(identity.mediaType, identity.tmdbId) : null;
-  // Fetched eagerly (not lazily) because "too few art" is now judged across
-  // ALL languages, not just the english/original bracket already in `payload`.
-  const allPayload = identity ? await getAllLanguageImages(identity.mediaType, identity.tmdbId) : null;
-
-  const overallEligible = (allPayload?.posters ?? []).filter((i) => i.width >= minWidth);
+  const overallEligible = (payload?.posters ?? []).filter((i) => i.width >= minWidth);
   const overallTooThin = overallEligible.length < config.minBracketSize;
 
   if (overallTooThin) {
@@ -91,14 +86,9 @@ async function resolvePoster(identity: Identity | null, ids: ParsedIds): Promise
     if (!selection.image) continue;
 
     if (!overallTooThin) {
-      // TMDB's overall coverage is healthy - trust the english-first
-      // cascade and return immediately, no vote-quality gate.
       return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: `tmdb:${bracket.name}` };
     }
 
-    // Overall coverage was thin and Metahub didn't pan out - rank every
-    // bracket's best candidate against each other rather than keeping
-    // whichever bracket happened to be checked first.
     if (!bestFallback || isBetterCandidate(selection.image, bestFallback.image)) {
       bestFallback = { image: selection.image, bracketName: bracket.name };
     }
@@ -108,9 +98,9 @@ async function resolvePoster(identity: Identity | null, ids: ParsedIds): Promise
     return { url: tmdbImageUrl(tmdbSize, bestFallback.image.file_path), source: `tmdb:${bestFallback.bracketName}:thin-fallback` };
   }
 
-  // Absolute last resort: best poster across all languages (already fetched above).
-  if (allPayload) {
-    const selection = selectBestImage(allPayload.posters, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
+  // Absolute last resort: best poster across every language already in `payload`.
+  if (payload) {
+    const selection = selectBestImage(payload.posters, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
     if (selection.image) {
       return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: 'tmdb:all-languages' };
     }
@@ -122,18 +112,14 @@ async function resolvePoster(identity: Identity | null, ids: ParsedIds): Promise
 }
 
 // ---------------------------------------------------------------------------
-// Backdrops: MUST stay textless (iso_639_1 === null) at every single stage,
-// including the absolute-last-resort "all languages" step. Never silently
-// hand back a backdrop with burned-in text just because nothing textless
-// was found - better to fall through to Metahub or return nothing.
+// Backdrops: MUST stay textless (iso_639_1 === null) at every stage, since
+// `payload` already contains every language in one fetch.
 // ---------------------------------------------------------------------------
-async function resolveBackdrop(identity: Identity | null, ids: ParsedIds): Promise<ResolvedArt | null> {
+async function resolveBackdrop(payload: TmdbImagesPayload | null, ids: ParsedIds): Promise<ResolvedArt | null> {
   const minWidth = config.minBackdropWidth;
   const tmdbSize = config.tmdbBackdropSize;
 
-  const payload = identity ? await getImages(identity.mediaType, identity.tmdbId) : null;
   const textless = (payload?.backdrops ?? []).filter((i) => i.iso_639_1 === null);
-
   const selection = selectBestImage(textless, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
   const eligibleCount = textless.filter((i) => i.width >= minWidth).length;
   const preferMetahub = eligibleCount < config.minBracketSize || selection.confidence !== 'good';
@@ -147,17 +133,6 @@ async function resolveBackdrop(identity: Identity | null, ids: ParsedIds): Promi
     if (metahub) return metahub;
   }
 
-  // Absolute last resort: still textless-only, just widened to every
-  // language's textless backdrops rather than en/original/null combo.
-  if (identity) {
-    const all = await getAllLanguageImages(identity.mediaType, identity.tmdbId);
-    const allTextless = (all?.backdrops ?? []).filter((i) => i.iso_639_1 === null);
-    const wideSelection = selectBestImage(allTextless, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
-    if (wideSelection.image) {
-      return { url: tmdbImageUrl(tmdbSize, wideSelection.image.file_path), source: 'tmdb:all-languages-textless' };
-    }
-  }
-
   if (selection.image) {
     return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: 'tmdb:textless:low-confidence' };
   }
@@ -169,14 +144,11 @@ async function resolveBackdrop(identity: Identity | null, ids: ParsedIds): Promi
 
 // ---------------------------------------------------------------------------
 // Logos: Metahub is used ONLY when TMDB has literally no logo in either the
-// english or original-language bracket - no vote-quality gate at all. If a
-// bracket has any eligible logo, it wins immediately, regardless of votes.
+// english or original-language bracket - no vote-quality gate at all.
 // ---------------------------------------------------------------------------
-async function resolveLogo(identity: Identity | null, ids: ParsedIds): Promise<ResolvedArt | null> {
+async function resolveLogo(payload: TmdbImagesPayload | null, ids: ParsedIds): Promise<ResolvedArt | null> {
   const minWidth = config.minLogoWidth;
   const tmdbSize = config.tmdbLogoSize;
-
-  const payload = identity ? await getImages(identity.mediaType, identity.tmdbId) : null;
 
   const brackets: { name: string; images: TmdbImage[] }[] = [];
   if (payload) {
@@ -193,14 +165,11 @@ async function resolveLogo(identity: Identity | null, ids: ParsedIds): Promise<R
     }
   }
 
-  // Both brackets came up completely empty - now, and only now, try Metahub.
   const metahub = await tryMetahub('logo', ids.imdbId, false);
   if (metahub) return metahub;
 
-  // Absolute last resort: best logo across all languages.
-  if (identity) {
-    const all = await getAllLanguageImages(identity.mediaType, identity.tmdbId);
-    const selection = selectBestImage(all?.logos ?? [], minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
+  if (payload) {
+    const selection = selectBestImage(payload.logos, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
     if (selection.image) {
       return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: 'tmdb:all-languages' };
     }

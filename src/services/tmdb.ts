@@ -73,10 +73,15 @@ function mapMeta(mediaType: TmdbMediaType, details: any): TitleMeta {
 }
 
 /**
- * Fetches title details (for original_language) + images restricted to
- * english + original-language + textless(null) in a single logical unit.
- * Cached once per tmdb id and reused across poster/backdrop/logo requests
- * for the same title.
+ * Fetches title details + the FULL multi-language image set (posters,
+ * backdrops, logos - every language TMDB has, not just English/original) in
+ * one logical unit, cached once per tmdb id and reused across poster/
+ * backdrop/logo requests for the same title. Language-specific brackets and
+ * the "overall art count" check are both derived from this single payload -
+ * deliberately not two separate calls, since that previously meant a title's
+ * "how much art exists at all" check could silently read as zero if the
+ * second call failed (e.g. under TMDB rate limiting), wrongly triggering
+ * Metahub even when TMDB actually had plenty of art.
  */
 export async function getImages(
   mediaType: TmdbMediaType,
@@ -98,8 +103,10 @@ export async function getImages(
       const originalLanguage: string = details.original_language || 'en';
       const meta = mapMeta(mediaType, details);
 
-      const langParam = Array.from(new Set(['en', originalLanguage])).join(',');
-      const imagesUrl = `${config.tmdbBaseUrl}/${mediaType}/${tmdbId}/images?api_key=${config.tmdbApiKey}&include_image_language=${langParam},null`;
+      // Broad, explicit language list rather than omitting the param -
+      // confirmed against a real TMDB response to actually return images
+      // across every language present, in one request.
+      const imagesUrl = `${config.tmdbBaseUrl}/${mediaType}/${tmdbId}/images?api_key=${config.tmdbApiKey}&include_image_language=${config.tmdbAllLanguagesFallbackList},null`;
       const imagesRes = await fetchWithTimeout(imagesUrl, config.requestTimeoutMs);
       if (!imagesRes.ok) {
         cacheSet(cacheKey, null, 3600);
@@ -119,42 +126,6 @@ export async function getImages(
       return payload;
     } catch (err) {
       logger.warn('[tmdb] getImages failed', mediaType, tmdbId, err);
-      return null;
-    }
-  });
-}
-
-/**
- * Broader fetch used ONLY for the rare "best art across all languages"
- * last-resort fallback, so the common-case call above stays cheap.
- */
-export async function getAllLanguageImages(
-  mediaType: TmdbMediaType,
-  tmdbId: string
-): Promise<Pick<TmdbImagesPayload, 'posters' | 'backdrops' | 'logos'> | null> {
-  const cacheKey = `tmdb-images-all:${mediaType}:${tmdbId}`;
-  const cached = cacheGet<Pick<TmdbImagesPayload, 'posters' | 'backdrops' | 'logos'> | null>(cacheKey);
-  if (cached !== undefined) return cached;
-
-  return dedupe(cacheKey, async () => {
-    try {
-      const langParam = config.tmdbAllLanguagesFallbackList;
-      const imagesUrl = `${config.tmdbBaseUrl}/${mediaType}/${tmdbId}/images?api_key=${config.tmdbApiKey}&include_image_language=${langParam},null`;
-      const res = await fetchWithTimeout(imagesUrl, config.requestTimeoutMs);
-      if (!res.ok) {
-        cacheSet(cacheKey, null, 3600);
-        return null;
-      }
-      const data = (await res.json()) as any;
-      const payload = {
-        posters: (data.posters || []).map(mapImage),
-        backdrops: (data.backdrops || []).map(mapImage),
-        logos: (data.logos || []).map(mapImage),
-      };
-      cacheSet(cacheKey, payload, config.tmdbPayloadTtlSeconds);
-      return payload;
-    } catch (err) {
-      logger.warn('[tmdb] getAllLanguageImages failed', mediaType, tmdbId, err);
       return null;
     }
   });

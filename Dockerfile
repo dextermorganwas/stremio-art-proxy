@@ -13,6 +13,12 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# sharp's SVG-to-raster step (used for poster badges) needs fontconfig and an
+# actual font installed to render any <text> at all - Alpine's base image has
+# neither, which is why badge text silently failed to draw.
+RUN apk add --no-cache fontconfig ttf-dejavu && fc-cache -f
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
