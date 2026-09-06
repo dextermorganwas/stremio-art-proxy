@@ -29,20 +29,6 @@ export const config = {
   tmdbPosterSize: str('TMDB_POSTER_SIZE', 'w780'),
   tmdbBackdropSize: str('TMDB_BACKDROP_SIZE', 'w1280'),
   tmdbLogoSize: str('TMDB_LOGO_SIZE', 'w500'),
-  // Broad, explicit language list for the single images call every art
-  // request makes (deliberately not "all languages" via wildcard, since
-  // TMDB's images endpoint has none - confirmed via their own dev forum).
-  // This is the default (near-full ISO 639-1 list); override to trim it if
-  // TMDB ever rejects a list this long.
-  tmdbAllLanguagesFallbackList: str(
-    'TMDB_ALL_LANGUAGES_FALLBACK_LIST',
-    'aa,ab,ae,af,ak,am,an,ar,as,av,ay,az,ba,be,bg,bh,bi,bm,bn,bo,br,bs,ca,ce,ch,co,cr,cs,cu,cv,cy,' +
-      'da,de,dv,dz,ee,el,en,eo,es,et,eu,fa,ff,fi,fj,fo,fr,fy,ga,gd,gl,gn,gu,gv,ha,he,hi,ho,hr,ht,hu,' +
-      'hy,hz,ia,id,ie,ig,ii,ik,io,is,it,iu,ja,jv,ka,kg,ki,kj,kk,kl,km,kn,ko,kr,ks,ku,kv,kw,ky,la,lb,' +
-      'lg,li,ln,lo,lt,lu,lv,mg,mh,mi,mk,ml,mn,mr,ms,mt,my,na,nb,nd,ne,ng,nl,nn,no,nr,nv,ny,oc,oj,om,' +
-      'or,os,pa,pi,pl,ps,pt,qu,rm,rn,ro,ru,rw,sa,sc,sd,se,sg,si,sk,sl,sm,sn,so,sq,sr,ss,st,su,sv,sw,' +
-      'ta,te,tg,th,ti,tk,tl,tn,to,tr,ts,tt,tw,ty,ug,uk,ur,uz,ve,vi,vo,wa,wo,xh,yi,yo,za,zh,zu'
-  ),
 
   // --- Metahub / Cinemeta fallback ---
   metahubBaseUrl: str('METAHUB_BASE_URL', 'https://images.metahub.space'),
@@ -99,20 +85,31 @@ export const config = {
 
   // --- Bottom status sash ---
   enableStatusSash: bool('ENABLE_STATUS_SASH', false),
-  sashHeightPercent: num('SASH_HEIGHT_PERCENT', 8),
-  // Below this average luminance (0-255) in the sash's own strip of the
-  // poster, the semantic color is swapped for a neutral dark gray instead -
-  // avoids garish color-on-dark-poster clashes.
-  sashDarkLuminanceThreshold: num('SASH_DARK_LUMINANCE_THRESHOLD', 60),
+  // Shape: a thin full-width baseline plus a taller, centered, top-rounded
+  // "tag" holding the label - not a plain full-height bar.
+  sashBaselineHeightPercent: num('SASH_BASELINE_HEIGHT_PERCENT', 2.5),
+  sashHeightPercent: num('SASH_HEIGHT_PERCENT', 9), // the raised "bump" section
+  sashBumpWidthPercent: num('SASH_BUMP_WIDTH_PERCENT', 56),
+
+  // 'auto' (default): color is extracted from the poster's own dominant/
+  // vibrant color, per-poster - not a fixed color per status. 'status': use
+  // the fixed SASH_COLOR_* below instead, same status = same color always.
+  sashColorMode: str('SASH_COLOR_MODE', 'auto'),
+  // In 'auto' mode, a candidate color's score must clear this (roughly
+  // saturation x how mid-toned x how populated, each 0-1) to be used at all;
+  // below it, the poster is judged too dark/desaturated for any accent color
+  // to look good, and SASH_COLOR_DARK_FALLBACK is used instead.
+  sashMinSaturationScore: num('SASH_MIN_SATURATION_SCORE', 0.15),
+  sashColorDarkFallback: str('SASH_COLOR_DARK_FALLBACK', '#232326'),
+
+  // Only used when SASH_COLOR_MODE=status.
   recentAddedWindowDays: num('RECENT_ADDED_WINDOW_DAYS', 30), // movies
   airingWindowDays: num('AIRING_WINDOW_DAYS', 14), // tv: "airing" vs "returning"
-
   sashColorAiring: str('SASH_COLOR_AIRING', '#2563EB'),
   sashColorReturning: str('SASH_COLOR_RETURNING', '#16A34A'),
   sashColorEnded: str('SASH_COLOR_ENDED', '#6B5B95'),
   sashColorCanceled: str('SASH_COLOR_CANCELED', '#DC2626'),
   sashColorRecentlyAdded: str('SASH_COLOR_RECENTLY_ADDED', '#DC2626'),
-  sashColorDarkFallback: str('SASH_COLOR_DARK_FALLBACK', '#232326'),
 
   // Badged (composited) posters are cached separately from plain resolved
   // URLs, and for less time, since trending/status data changes over time.

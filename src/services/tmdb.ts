@@ -73,15 +73,17 @@ function mapMeta(mediaType: TmdbMediaType, details: any): TitleMeta {
 }
 
 /**
- * Fetches title details + the FULL multi-language image set (posters,
- * backdrops, logos - every language TMDB has, not just English/original) in
- * one logical unit, cached once per tmdb id and reused across poster/
- * backdrop/logo requests for the same title. Language-specific brackets and
- * the "overall art count" check are both derived from this single payload -
- * deliberately not two separate calls, since that previously meant a title's
- * "how much art exists at all" check could silently read as zero if the
- * second call failed (e.g. under TMDB rate limiting), wrongly triggering
- * Metahub even when TMDB actually had plenty of art.
+ * Fetches title details + images restricted to English + original-language +
+ * textless(null) - deliberately NOT a giant enumerated language list.
+ *
+ * (History: an earlier version requested ~180 languages in
+ * include_image_language to compute a true "art across every language"
+ * count. That's almost certainly outside what TMDB's API actually supports
+ * well - their own docs and every community example use small lists like
+ * "en,null" - and it produced exactly the symptoms of a broken/truncated
+ * response: English posters going missing from results, forcing fallback
+ * logic to kick in on well-covered titles. Reverted to the pattern TMDB's
+ * own users rely on.)
  */
 export async function getImages(
   mediaType: TmdbMediaType,
@@ -103,10 +105,8 @@ export async function getImages(
       const originalLanguage: string = details.original_language || 'en';
       const meta = mapMeta(mediaType, details);
 
-      // Broad, explicit language list rather than omitting the param -
-      // confirmed against a real TMDB response to actually return images
-      // across every language present, in one request.
-      const imagesUrl = `${config.tmdbBaseUrl}/${mediaType}/${tmdbId}/images?api_key=${config.tmdbApiKey}&include_image_language=${config.tmdbAllLanguagesFallbackList},null`;
+      const langParam = Array.from(new Set(['en', originalLanguage])).join(',');
+      const imagesUrl = `${config.tmdbBaseUrl}/${mediaType}/${tmdbId}/images?api_key=${config.tmdbApiKey}&include_image_language=${langParam},null`;
       const imagesRes = await fetchWithTimeout(imagesUrl, config.requestTimeoutMs);
       if (!imagesRes.ok) {
         cacheSet(cacheKey, null, 3600);
@@ -140,7 +140,10 @@ export async function getTmdbTrendingIds(mediaType: TmdbMediaType): Promise<stri
   try {
     const url = `${config.tmdbBaseUrl}/trending/${mediaType}/${config.trendingTmdbWindow}?api_key=${config.tmdbApiKey}`;
     const res = await fetchWithTimeout(url, config.requestTimeoutMs);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logger.warn('[tmdb] getTmdbTrendingIds got non-OK response', mediaType, res.status);
+      return [];
+    }
     const data = (await res.json()) as any;
     return (data.results || []).map((r: any) => String(r.id));
   } catch (err) {

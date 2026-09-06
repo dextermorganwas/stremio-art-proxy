@@ -27,23 +27,31 @@ usable id, or the request 400s.
 ## Selection logic (what it actually does — per art type, they genuinely differ)
 
 **Posters:**
-1. Count *all* eligible TMDB posters across every language (not just
-   English/original). If that overall count is below `MIN_BRACKET_SIZE`
-   (default 5), TMDB's coverage of this title is judged too thin — try
-   Metahub first.
+1. Count eligible, **non-textless** TMDB posters across the English +
+   original-language pool (textless/`iso_639_1 === null` posters are never
+   counted or picked for posters — see below). If that combined count is
+   below `MIN_BRACKET_SIZE` (default 5), TMDB's coverage of this title is
+   judged too thin — try Metahub first.
 2. Otherwise (or if Metahub had nothing), cascade English → original
    language, taking the best-scoring image in whichever bracket has any
-   candidates. No vote-quality gate at this stage — if TMDB's overall
-   coverage is healthy, its English-first pick is trusted as-is.
+   candidates. No vote-quality gate at this stage — if coverage is healthy,
+   the English-first pick is trusted as-is.
 3. If TMDB was thin and Metahub also failed, rank the best candidate from
    *every* bracket against each other (not just whichever was checked
    first) and use the best of those.
-4. Absolute last resort: best-scoring poster across a broad list of
-   languages (`TMDB_ALL_LANGUAGES_FALLBACK_LIST`).
+4. Absolute last resort: best-scoring **non-textless** poster TMDB has for
+   this title in any language.
+
+**Textless posters are always excluded.** TMDB tags genuinely
+text-free/"clean" poster art with `iso_639_1: null` — the same tag used for
+textless backdrops, uploaded deliberately for custom-skin use (Kodi/Plex
+style). Because that art is often community-upvoted, it could otherwise win
+a vote-based ranking and show up as a poster with no title/logo on it at
+all — excluded entirely so that never happens.
 
 **Logos:** simple cascade, no quality gate anywhere —
 English bracket → original-language bracket → Metahub (only tried when
-*both* brackets are completely empty) → best-of-all-languages TMDB logo.
+*both* brackets are completely empty) → best-of-available-languages TMDB logo.
 
 **Backdrops:** only ever considers *textless* TMDB backdrops — at every
 single stage, including the final fallback. TMDB has no explicit "textless"
@@ -52,7 +60,7 @@ flag; by convention, backdrops with no burned-in text carry no language tag
 1. Look at textless backdrops. If fewer than `MIN_BRACKET_SIZE` are eligible,
    or none clear the scoring floor below, try Metahub.
 2. If that also fails, use TMDB's low-confidence textless pick rather than
-   nothing.
+   nothing — still textless, never falls back to a backdrop with text.
 
 **Scoring ("best" image within a bracket), exactly as you described:**
 1. Hard filter: drop anything under `MIN_POSTER_WIDTH` (750px) /
@@ -74,21 +82,23 @@ Metahub URL, the app does a `HEAD` request and checks `Content-Length` against
 `METAHUB_MIN_CONTENT_LENGTH_BYTES`, so a broken/placeholder image on Metahub's
 end doesn't get redirected to. Logos skip this check.
 
+**Why only English + original language, not "every language TMDB has"?**
+An earlier version tried to enumerate ~180 language codes in one request to
+get a true "art across every language" count. That's outside what TMDB's API
+reliably supports — their own docs and every community example use small
+lists like `en,null` — and in practice it silently corrupted results (English
+posters going missing entirely on well-covered titles), which is what caused
+both the "textless poster" and "excess Metahub fallback" bugs. Reverted to
+the small, well-established `en,{original},null` request pattern, and
+"overall coverage" is now judged from the combined English + original pool
+rather than a separate broad-language call.
+
 ### Assumptions I made where your spec was open-ended
 
 These are all just `.env` values — tune freely:
 
 - "720p" / "750p" thresholds are interpreted as **pixel width**
   (`MIN_BACKDROP_WIDTH=1280`, `MIN_POSTER_WIDTH=750`), not video resolution.
-- "All languages" fallback enumerates the full ISO-639-1 code list
-  (`TMDB_ALL_LANGUAGES_FALLBACK_LIST`). TMDB's images endpoint has no
-  wildcard for `include_image_language` - confirmed via TMDB's own dev
-  forum, where a "give me every language" option was requested and never
-  added - so enumerating every code is the only way to get true broad
-  coverage.
-- Backdrops' absolute last-resort fallback (after Metahub also fails) allows
-  *any* backdrop regardless of text, not just textless ones — better than a
-  404.
 - The "resource intensity" knob is `MAX_CONCURRENT_UPSTREAM`, which caps how
   many simultaneous TMDB/Metahub requests the server makes at once. Lower it
   on weaker hardware.
@@ -114,19 +124,32 @@ corner — no gradient. Source is switchable:
   no API key — this uses MDBList's public `/lists/{username}/{slug}/json`
   endpoint rather than the key-gated REST API.
 
-**Status sash:** a thin bar across the bottom - Airing / Returning / Ended /
-Canceled for TV (from TMDB's `status` field, with Airing vs Returning split
-by how close the nearest episode is, `AIRING_WINDOW_DAYS`), or Recently Added
-for movies (TMDB has no "added to your library" concept, so this uses
-release-date recency, `RECENT_ADDED_WINDOW_DAYS`, as the closest proxy).
-Colors per status are set in `.env` (`SASH_COLOR_*`). Before drawing it, the
-app samples the poster's own pixels in that bottom strip - if the poster is
-already dark there, it uses a neutral dark charcoal (`SASH_COLOR_DARK_FALLBACK`,
-`#232326`) instead of the semantic color, so a bright blue/green bar doesn't
-clash with a moody dark poster. Note: `SASH_COLOR_ENDED` and the dark
-fallback are deliberately different colors (muted purple vs near-black) so
-you can visually tell which one fired, rather than two shades of gray that
-look identical either way.
+**Status sash:** shape is a thin full-width baseline with a taller, centered,
+top-rounded "tag" holding the label rising out of it — edge → thin line →
+bump up around the text → thin line → edge — not a plain full-height bar.
+Tune the proportions with `SASH_BASELINE_HEIGHT_PERCENT` (the thin part),
+`SASH_HEIGHT_PERCENT` (the bump's height), and `SASH_BUMP_WIDTH_PERCENT` (how
+wide the bump is relative to the poster).
+
+The label text is still Airing / Returning / Ended / Canceled for TV (from
+TMDB's `status` field, Airing vs Returning split by how close the nearest
+episode is, `AIRING_WINDOW_DAYS`) or Recently Added for movies (release-date
+recency, `RECENT_ADDED_WINDOW_DAYS`, since TMDB has no "added to your
+library" concept).
+
+**Color is extracted from each poster itself** (`SASH_COLOR_MODE=auto`,
+the default) — not a fixed color per status. It downsamples the poster,
+buckets pixels by hue, and scores each bucket by how saturated, how
+mid-toned, and how well-populated it is (similar in spirit to Android's
+"Vibrant" palette swatch) — so a plain average-color approach, which tends
+toward muddy gray-brown, is avoided. If nothing in the poster clears
+`SASH_MIN_SATURATION_SCORE`, the poster is judged too dark/desaturated for
+any accent color to look good, and `SASH_COLOR_DARK_FALLBACK` (`#232326`,
+near-black) is used instead — text color is then chosen automatically
+(white or near-black) for contrast against whatever color won. Set
+`SASH_COLOR_MODE=status` to go back to a fixed color per status instead
+(`SASH_COLOR_AIRING`, `SASH_COLOR_ENDED`, etc.) if you'd rather every
+"Ended" show use the same color regardless of poster.
 
 **Rendering requirements:** drawing text onto an image requires an actual
 font and fontconfig installed in the container — Alpine's base image has

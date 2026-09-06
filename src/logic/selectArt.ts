@@ -52,16 +52,20 @@ export async function resolveArt(artType: ArtType, ids: ParsedIds): Promise<Reso
 }
 
 // ---------------------------------------------------------------------------
-// Posters: fallback to Metahub only when TMDB's *overall* coverage (across
-// every language in `payload`, not just the english/original bracket) is
-// thin or empty. Once TMDB coverage is judged sufficient, English-first
-// cascade applies with no additional vote-quality gate.
+// Posters: fallback to Metahub only when TMDB's combined English + original-
+// language coverage is thin or empty (not a separate "every language TMDB
+// has" call - that requires enumerating a huge language list, which TMDB
+// doesn't reliably support and previously corrupted results). Textless
+// (iso_639_1 === null) images are NEVER eligible as a poster - that tag
+// means "no text/logo", which TMDB also uses for deliberately clean/skin-
+// ready art; a textless image showing up as a poster is always wrong.
 // ---------------------------------------------------------------------------
 async function resolvePoster(payload: TmdbImagesPayload | null, ids: ParsedIds): Promise<ResolvedArt | null> {
   const minWidth = config.minPosterWidth;
   const tmdbSize = config.tmdbPosterSize;
 
-  const overallEligible = (payload?.posters ?? []).filter((i) => i.width >= minWidth);
+  const nonTextless = (payload?.posters ?? []).filter((i) => i.iso_639_1 !== null);
+  const overallEligible = nonTextless.filter((i) => i.width >= minWidth);
   const overallTooThin = overallEligible.length < config.minBracketSize;
 
   if (overallTooThin) {
@@ -73,9 +77,9 @@ async function resolvePoster(payload: TmdbImagesPayload | null, ids: ParsedIds):
 
   const brackets: { name: string; images: TmdbImage[] }[] = [];
   if (payload) {
-    brackets.push({ name: 'english', images: payload.posters.filter((i) => i.iso_639_1 === 'en') });
+    brackets.push({ name: 'english', images: nonTextless.filter((i) => i.iso_639_1 === 'en') });
     if (payload.originalLanguage !== 'en') {
-      brackets.push({ name: 'original', images: payload.posters.filter((i) => i.iso_639_1 === payload.originalLanguage) });
+      brackets.push({ name: 'original', images: nonTextless.filter((i) => i.iso_639_1 === payload.originalLanguage) });
     }
   }
 
@@ -98,11 +102,11 @@ async function resolvePoster(payload: TmdbImagesPayload | null, ids: ParsedIds):
     return { url: tmdbImageUrl(tmdbSize, bestFallback.image.file_path), source: `tmdb:${bestFallback.bracketName}:thin-fallback` };
   }
 
-  // Absolute last resort: best poster across every language already in `payload`.
-  if (payload) {
-    const selection = selectBestImage(payload.posters, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
+  // Absolute last resort: best NON-TEXTLESS poster TMDB has for this title.
+  if (nonTextless.length > 0) {
+    const selection = selectBestImage(nonTextless, minWidth, config.voteFloorStart, config.voteFloorMin, config.voteFloorStep);
     if (selection.image) {
-      return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: 'tmdb:all-languages' };
+      return { url: tmdbImageUrl(tmdbSize, selection.image.file_path), source: 'tmdb:any-language' };
     }
   }
 
